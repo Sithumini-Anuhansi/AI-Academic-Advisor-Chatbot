@@ -7,36 +7,28 @@ Original file is located at
     https://colab.research.google.com/drive/1Ee0BZ8qK9ngjqMcTukPVxmN6dvN35qv0
 """
 
+## train_model.py — AI Academic Advisor ##
+## Run this once to train and save your model ##
+
 ## Import Libraries ##
 
 import pandas as pd
 import numpy as np
-
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score
-
+from sklearn.metrics import accuracy_score, classification_report
 from sklearn.linear_model import LogisticRegression
-
-from google.colab import files
-
 import joblib
-import io
-
-## Select and Upload Dataset ##
-
-uploaded = files.upload()
+import os
 
 ## Load Dataset ##
 
-df = pd.read_csv(io.BytesIO(uploaded[list(uploaded.keys())[0]]))
-
-df.head()
+df = pd.read_csv("data/student_data.csv")
 
 ## Check Data ##
 
 df.info()
-df.isnull().sum()
+print("\nMissing values:\n", df.isnull().sum())
 
 ## Create Target Column (PASS / FAIL) ##
 
@@ -58,43 +50,42 @@ X = df[[
 
 y = df['Result']
 
-## Scale Data ##
-
-scaler = StandardScaler()
-X_scaled = scaler.fit_transform(X)
-
 ## Train/Test Split ##
 
 X_train, X_test, y_train, y_test = train_test_split(
-    X_scaled, y,
+    X, y,
     test_size=0.3,
     random_state=42
 )
 
+## Scale Data ##
+
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled  = scaler.transform(X_test)
+
 ## Train Model (LOGISTIC REGRESSION) ##
 
 model = LogisticRegression()
-model.fit(X_train, y_train)
+model.fit(X_train_scaled, y_train)
 
 ## Test Model ##
 
-y_pred = model.predict(X_test)
+y_pred = model.predict(X_test_scaled)
 
 print(y_pred[:10])
 
 ## Check Accuracy ##
 
 accuracy = accuracy_score(y_test, y_pred)
-print("Accuracy:", accuracy)
+print(f"\nAccuracy: {accuracy * 100:.1f}%")
+print("\nDetailed report:\n", classification_report(y_test, y_pred))
 
 ## Save Model ##
 
-joblib.dump(model, "student_model.pkl")
-joblib.dump(scaler, "scaler.pkl")
+os.makedirs("model", exist_ok=True)
 
-## Download Model ##
+joblib.dump(model, "model/student_model.pkl")
+joblib.dump(scaler, "model/scaler.pkl")
 
-files.download("student_model.pkl")
-files.download("scaler.pkl")
-
-print("Model Saved")
+print("Model and scaler saved to model/")
