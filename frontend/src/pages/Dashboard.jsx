@@ -1,24 +1,37 @@
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
+import {
+  LineChart, Line, BarChart, Bar,
+  PieChart, Pie, Cell,
+  XAxis, YAxis, Tooltip,
+  ResponsiveContainer, Legend
+} from "recharts";
 import API from "../api/axios";
+
+const COLORS = { PASS: "#16a34a", FAIL: "#dc2626" };
 
 function Dashboard() {
   const [predictions, setPredictions] = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [error, setError]             = useState("");
+  const [analytics,   setAnalytics]   = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState("");
 
   useEffect(() => {
-    const fetchPredictions = async () => {
+    const load = async () => {
       try {
-        const res = await API.get("/predictions/history");
-        setPredictions(res.data.predictions);
+        const [histRes, analyticsRes] = await Promise.all([
+          API.get("/predictions/history"),
+          API.get("/predictions/analytics"),
+        ]);
+        setPredictions(histRes.data.predictions);
+        setAnalytics(analyticsRes.data.analytics);
       } catch (err) {
-        setError("Could not load prediction history.");
+        setError("Could not load dashboard data.");
       } finally {
         setLoading(false);
       }
     };
-    fetchPredictions();
+    load();
   }, []);
 
   const passCount = predictions.filter((p) => p.prediction === "PASS").length;
@@ -29,6 +42,11 @@ function Dashboard() {
     new Date(dateStr).toLocaleDateString("en-GB", {
       day: "numeric", month: "short", year: "numeric",
     });
+
+  const pieData = [
+    { name: "Pass", value: passCount },
+    { name: "Fail", value: failCount },
+  ];
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-10">
@@ -88,11 +106,87 @@ function Dashboard() {
             </div>
             <Link
               to="/chatbot"
+              state={{ prediction: latest.prediction, confidence: latest.confidence }}
               className="text-sm bg-white border border-gray-200 px-4 py-2 rounded-lg hover:bg-gray-50 transition text-gray-700"
             >
               Get advice →
             </Link>
           </div>
+        </div>
+      )}
+
+      {/* Charts — only render when analytics data exists */}
+      {analytics && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+
+          {/* Pass vs Fail donut */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">
+              Pass vs fail
+            </h2>
+            <ResponsiveContainer width="100%" height={200}>
+              <PieChart>
+                <Pie
+                  data={pieData}
+                  cx="50%" cy="50%"
+                  innerRadius={55} outerRadius={80}
+                  paddingAngle={3} dataKey="value"
+                >
+                  {pieData.map((entry) => (
+                    <Cell
+                      key={entry.name}
+                      fill={entry.name === "Pass" ? COLORS.PASS : COLORS.FAIL}
+                    />
+                  ))}
+                </Pie>
+                <Tooltip formatter={(v) => [v, "Predictions"]} />
+                <Legend />
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Average input scores bar chart */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5">
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">
+              Average input scores
+            </h2>
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart
+                data={analytics.subject_data}
+                margin={{ top: 0, right: 0, left: -20, bottom: 0 }}
+              >
+                <XAxis dataKey="subject" tick={{ fontSize: 11 }} />
+                <YAxis tick={{ fontSize: 11 }} />
+                <Tooltip />
+                <Bar dataKey="value" fill="#6366f1" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Confidence trend line chart */}
+          <div className="bg-white border border-gray-200 rounded-xl p-5 md:col-span-2">
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">
+              Confidence trend over time
+            </h2>
+            <ResponsiveContainer width="100%" height={200}>
+              <LineChart
+                data={analytics.trend}
+                margin={{ top: 0, right: 16, left: -20, bottom: 0 }}
+              >
+                <XAxis dataKey="date" tick={{ fontSize: 11 }} />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
+                <Tooltip formatter={(v) => [v + "%", "Confidence"]} />
+                <Line
+                  type="monotone"
+                  dataKey="confidence"
+                  stroke="#6366f1"
+                  strokeWidth={2}
+                  dot={{ r: 4 }}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+
         </div>
       )}
 
