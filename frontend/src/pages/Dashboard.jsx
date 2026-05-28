@@ -65,15 +65,15 @@ function Dashboard() {
 
       {/* Page header */}
       <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-900">
-            Dashboard
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Your academic prediction history and performance overview
-          </p>
+        <div className="flex items-center gap-3">
+          <img src="/logo.png" alt="EduMentor AI" className="h-12 w-12 object-contain" />
+          <div>
+            <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Your academic prediction history and performance overview
+            </p>
+          </div>
         </div>
-
         <Link
           to="/predict"
           className="bg-indigo-600 text-white text-sm px-4 py-2.5 rounded-lg font-medium hover:bg-indigo-700 transition"

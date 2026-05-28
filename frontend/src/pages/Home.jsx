@@ -32,6 +32,11 @@ function Home() {
 
       {/* Hero */}
       <section className="max-w-3xl mx-auto px-6 pt-20 pb-16 text-center">
+        <img
+          src="/logo.png"
+          alt="EduMentor AI"
+          className="h-24 w-24 object-contain mx-auto mb-4"
+        />
         <span className="inline-block bg-indigo-100 text-indigo-700 text-sm font-medium px-4 py-1 rounded-full mb-6">
           AI-powered academic support
         </span>

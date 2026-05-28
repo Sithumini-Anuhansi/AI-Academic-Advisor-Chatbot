@@ -2,10 +2,10 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 
 function Navbar() {
-  const [token, setToken]     = useState(localStorage.getItem("token"));
+  const [token, setToken]       = useState(localStorage.getItem("token"));
   const [menuOpen, setMenuOpen] = useState(false);
-  const navigate              = useNavigate();
-  const location              = useLocation();
+  const navigate                = useNavigate();
+  const location                = useLocation();
 
   useEffect(() => {
     setToken(localStorage.getItem("token"));
@@ -20,9 +20,14 @@ function Navbar() {
 
   return (
     <nav className="fixed top-0 w-full bg-white border-b border-gray-200 z-10">
-      <div className="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
-        <Link to="/" className="font-semibold text-indigo-600">
-          AI Academic Advisor
+      <div className="max-w-6xl mx-auto px-4 py-2 flex justify-between items-center">
+
+        {/* Logo + name */}
+        <Link to="/" className="flex items-center gap-2">
+          <img src="/logo.png" alt="EduMentor AI" className="h-10 w-10 object-contain" />
+          <span className="font-bold text-indigo-600 text-base hidden sm:block">
+            EduMentor AI
+          </span>
         </Link>
 
         {/* Desktop links */}
