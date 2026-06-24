@@ -57,6 +57,7 @@ function Chatbot() {
   const [messages, setMessages]       = useState([]);
   const [input, setInput]             = useState("");
   const [loading, setLoading]         = useState(false);
+  const [isFallback, setIsFallback]   = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
   const bottomRef                     = useRef(null);
   const inputRef                      = useRef(null);
@@ -98,15 +99,37 @@ function Chatbot() {
         message:    userText,
         prediction: state?.prediction || null,
       });
+
+      setIsFallback(res.data.source === "fallback");
       setMessages((prev) => [...prev, { role: "bot", text: res.data.message }]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "bot",
-          text: "Sorry, I'm having trouble responding right now. Please try again in a moment.",
-        },
-      ]);
+
+    } catch (err) {
+      const status    = err.response?.status;
+      const serverMsg = err.response?.data?.error;
+
+      if (status === 429) {
+        const retryAfter = err.response?.data?.retry_after || 60;
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "bot",
+            text: `${serverMsg || "The AI is busy."} Please wait ${retryAfter} seconds and try again.`,
+          },
+        ]);
+      } else if (status === 401) {
+        setMessages((prev) => [
+          ...prev,
+          { role: "bot", text: "Your session expired. Please log in again." },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "bot",
+            text: serverMsg || "Sorry, I'm having trouble responding right now. Please try again.",
+          },
+        ]);
+      }
     } finally {
       setLoading(false);
       inputRef.current?.focus();
@@ -138,6 +161,13 @@ function Chatbot() {
           </span>
         </div>
       </div>
+
+      {/* Fallback banner */}
+      {isFallback && (
+        <div className="mb-3 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+          AI is temporarily unavailable — showing general advice. Personalised answers will return when the service is restored.
+        </div>
+      )}
 
       {/* Chat window */}
       <div className="bg-gray-50 border border-gray-200 rounded-2xl flex flex-col overflow-hidden">

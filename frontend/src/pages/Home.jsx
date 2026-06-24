@@ -31,32 +31,37 @@ function Home() {
     <div className="min-h-screen bg-gray-50">
 
       {/* Hero */}
-      <section className="max-w-3xl mx-auto px-6 pt-20 pb-16 text-center">
+      <section className="max-w-3xl mx-auto px-4 pt-2 pb-6 text-center">
+
         <img
           src="/logo.png"
           alt="EduMentor AI"
-          className="h-24 w-24 object-contain mx-auto mb-4"
+          className="h-52 w-52 object-contain mx-auto mb-2"
         />
-        <span className="inline-block bg-indigo-100 text-indigo-700 text-sm font-medium px-4 py-1 rounded-full mb-6">
+ 
+        <span className="inline-block bg-indigo-100 text-indigo-700 text-sm font-medium px-2 py-1 rounded-full mb-2">
           AI-powered academic support
         </span>
-        <h1 className="text-5xl font-semibold text-gray-900 leading-tight mb-6">
+
+        <h1 className="text-5xl font-semibold text-gray-900 leading-tight mb-2">
           Know your academic risk{" "}
           <span className="text-indigo-600">before exams</span>
         </h1>
-        <p className="text-lg text-gray-500 mb-10 max-w-xl mx-auto">
+
+        <p className="text-lg text-gray-500 mb-4 max-w-xl mx-auto">
           Enter your attendance, test scores, and study hours. Our ML model
           predicts your outcome and an AI advisor tells you exactly what to do next.
         </p>
 
         {!token && (
-          <div className="flex justify-center gap-4 flex-wrap">
+          <div className="flex justify-center gap-3 flex-wrap">
             <Link
               to="/register"
               className="bg-indigo-600 text-white px-6 py-3 rounded-lg font-medium hover:bg-indigo-700 transition"
             >
               Get started free
             </Link>
+
             <Link
               to="/login"
               className="border border-gray-300 text-gray-700 px-6 py-3 rounded-lg font-medium hover:bg-gray-100 transition"
@@ -77,14 +82,16 @@ function Home() {
       </section>
 
       {/* Stats */}
-      <section className="max-w-3xl mx-auto px-6 pb-16">
-        <div className="grid grid-cols-3 gap-4">
+      <section className="max-w-3xl mx-auto px-4 pb-10">
+        <div className="grid grid-cols-3 gap-3">
           {stats.map((s) => (
             <div
               key={s.label}
-              className="bg-white border border-gray-200 rounded-xl p-6 text-center"
+              className="bg-white border border-gray-200 rounded-xl p-5 text-center"
             >
-              <p className="text-3xl font-semibold text-indigo-600 mb-1">{s.value}</p>
+              <p className="text-3xl font-semibold text-indigo-600 mb-1">
+                {s.value}
+              </p>
               <p className="text-sm text-gray-500">{s.label}</p>
             </div>
           ))}
@@ -92,32 +99,45 @@ function Home() {
       </section>
 
       {/* Features */}
-      <section className="max-w-3xl mx-auto px-6 pb-24">
-        <h2 className="text-2xl font-semibold text-gray-900 text-center mb-10">
+      <section className="max-w-3xl mx-auto px-4 pb-16">
+
+        <h2 className="text-2xl font-semibold text-gray-900 text-center mb-6">
           Everything you need to stay on track
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+
           {features.map((f) => (
             <div
               key={f.title}
-              className="bg-white border border-gray-200 rounded-xl p-6 text-left"
+              className="bg-white border border-gray-200 rounded-xl p-5 text-left"
             >
-              <div className="text-3xl mb-4">{f.icon}</div>
-              <h3 className="text-base font-semibold text-gray-900 mb-2">{f.title}</h3>
-              <p className="text-sm text-gray-500 leading-relaxed">{f.desc}</p>
+              <div className="text-3xl mb-3">{f.icon}</div>
+
+              <h3 className="text-base font-semibold text-gray-900 mb-1">
+                {f.title}
+              </h3>
+
+              <p className="text-sm text-gray-500 leading-relaxed">
+                {f.desc}
+              </p>
             </div>
           ))}
+
         </div>
       </section>
 
       {/* CTA */}
-      <section className="bg-indigo-600 py-16 text-center px-6">
-        <h2 className="text-2xl font-semibold text-white mb-4">
+      <section className="bg-indigo-600 py-12 text-center px-6">
+
+        <h2 className="text-2xl font-semibold text-white mb-2">
           Ready to take control of your results?
         </h2>
-        <p className="text-indigo-200 mb-8 max-w-md mx-auto">
+
+        <p className="text-indigo-200 mb-6 max-w-md mx-auto">
           Sign up in seconds — no credit card needed.
         </p>
+
         {!token && (
           <Link
             to="/register"
@@ -126,6 +146,7 @@ function Home() {
             Create your account
           </Link>
         )}
+
         {token && (
           <Link
             to="/predict"

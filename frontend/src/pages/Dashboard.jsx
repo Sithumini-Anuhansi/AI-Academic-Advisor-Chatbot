@@ -66,7 +66,7 @@ function Dashboard() {
       {/* Page header */}
       <div className="flex items-center justify-between mb-8">
         <div className="flex items-center gap-3">
-          <img src="/logo.png" alt="EduMentor AI" className="h-12 w-12 object-contain" />
+          <img src="/logo.png" alt="EduMentor AI" className="h-32 w-32 object-contain" />
           <div>
             <h1 className="text-2xl font-semibold text-gray-900">Dashboard</h1>
             <p className="text-sm text-gray-500 mt-0.5">

@@ -1,6 +1,6 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from flask_jwt_extended import JWTManager
+from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
 from dotenv import load_dotenv
 from datetime import timedelta
 import os
@@ -11,7 +11,7 @@ from database.db import db
 from database.models import User, Prediction
 from routes.auth import auth_bp
 from routes.predictions import predictions_bp
-from chatbot.chatbot import generate_advice
+from chatbot.chatbot import generate_advice, GeminiQuotaError
 
 app = Flask(__name__)
 CORS(app)
@@ -33,16 +33,33 @@ with app.app_context():
 
 
 @app.route("/chat", methods=["POST"])
+@jwt_required()
 def chat():
-    data       = request.get_json()
-    message    = data.get("message", "").strip()
-    prediction = data.get("prediction", None)
+    data    = request.get_json()
+    message = data.get("message", "").strip()
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
 
-    advice = generate_advice(message, prediction)
-    return jsonify({"message": advice})
+    user_id = int(get_jwt_identity())
+    latest = (
+        Prediction.query.filter_by(user_id=user_id)
+        .order_by(Prediction.created_at.desc())
+        .first()
+    )
+    prediction = latest.prediction if latest else data.get("prediction")
+
+    try:
+        result = generate_advice(message, prediction)
+        return jsonify(result)
+    except GeminiQuotaError:
+        return jsonify({
+            "error": "The AI is currently busy. Please try again in a minute.",
+            "retry_after": 60,
+        }), 429
+    except Exception:
+        app.logger.exception("Chat error")
+        return jsonify({"error": "An internal server error occurred."}), 500
 
 
 @app.route("/health", methods=["GET"])
@@ -51,4 +68,5 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)

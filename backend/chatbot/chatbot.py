@@ -1,147 +1,241 @@
 import os
-from openai import OpenAI
+import logging
+from google import genai
+from google.genai import types
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
-SYSTEM_PROMPT = """You are an AI academic advisor for university students.
-Your job is to help students improve their academic performance based on their
-predicted pass/fail result and the data they submitted (attendance, test scores,
-assignment scores, and study hours).
+logger = logging.getLogger(__name__)
+
+
+class GeminiQuotaError(Exception):
+    """Raised when Gemini returns 429 / RESOURCE_EXHAUSTED — never silently swallowed."""
+    pass
+
+
+SYSTEM_PROMPT = """You are EduMentor AI — a friendly, knowledgeable, and practical academic advisor
+for university students. You help students improve their academic performance.
+
+You can help with ANY academic question including:
+- Creating personalised study plans and timetables
+- Exam and test preparation strategies
+- Time management and scheduling
+- Motivation and dealing with procrastination
+- Stress, anxiety, and mental wellbeing
+- Note-taking techniques
+- Understanding grades and predictions
+- Assignment writing tips
+- Subject-specific study advice
+- Sleep, nutrition, and focus tips for studying
 
 Guidelines:
-- Be supportive, practical, and encouraging at all times.
-- Give specific, actionable advice — not vague motivation.
-- Keep responses concise: 3 to 6 sentences or a short numbered list.
-- If the student has a FAIL prediction, be direct about the urgency but stay positive.
-- If the student has a PASS prediction, encourage them to maintain and improve further.
-- If no prediction context is given, give general academic advice.
-- Do not mention that you are an AI language model or reference OpenAI.
-- Respond as if you are their personal academic advisor."""
+- Be warm, supportive, and encouraging at all times.
+- Give SPECIFIC, ACTIONABLE advice — never vague motivation.
+- When asked to CREATE something (a plan, timetable, schedule) — actually create it with clear structure.
+- When asked a HOW question — give numbered steps.
+- Keep responses focused: 4 to 8 sentences or a short structured list.
+- If the student has a FAIL prediction, be direct about urgency but stay positive.
+- If the student has a PASS prediction, encourage improvement.
+- Never mention Google, Gemini, or that you are an AI language model.
+- Respond as their dedicated personal academic advisor named EduMentor AI."""
 
-FALLBACK_ADVICE = {
+
+FALLBACK_RESPONSES = {
+    ("attendance", "absent", "missing class", "skip class", "miss class"): (
+        "Improving attendance starts with removing barriers. Set an alarm 60 minutes "
+        "before class, lay out your materials the night before, and track your attendance "
+        "weekly. If personal issues are affecting you, speak to your lecturer early — "
+        "they can often arrange support or catch-up materials."
+    ),
+    ("study plan", "timetable", "schedule", "study schedule", "weekly plan", "categoris", "categori"): (
+        "Here is a sample daily study plan you can adapt:\n\n"
+        "Morning (2 hours):\n"
+        "  0:00-0:25  Theory review (read notes / slides)\n"
+        "  0:25-0:30  Break\n"
+        "  0:30-0:55  Active recall (close notes, write what you remember)\n"
+        "  0:55-1:00  Break\n"
+        "  1:00-1:25  Past question practice\n"
+        "  1:25-2:00  Review wrong answers and fill gaps\n\n"
+        "Evening (1.5 hours):\n"
+        "  Review today's lecture notes within 24 hours\n"
+        "  Write a 3-sentence summary of each topic in your own words\n\n"
+        "Rotate subjects daily so no topic goes more than 2 days without review."
+    ),
+    ("internal test", "prepare for test", "prepare for exam", "test prep", "exam prep"): (
+        "To prepare for internal tests:\n\n"
+        "1. Review your lecture notes and highlight key concepts.\n"
+        "2. Close your notes and write everything you remember (active recall).\n"
+        "3. Attempt past questions under timed conditions.\n"
+        "4. Review every wrong answer — understand why, not just what the right answer is.\n"
+        "5. Summarise weak topics on a single revision sheet.\n"
+        "6. Get 8 hours of sleep the night before — cramming the night before backfires."
+    ),
+    ("active recall", "flashcard", "spaced repetition", "revision technique", "study technique", "how to study"): (
+        "The most effective study techniques are:\n\n"
+        "1. Active recall — close your notes and write everything you remember. Check and fill gaps.\n"
+        "2. Spaced repetition — review after 1 day, 3 days, 1 week, and 2 weeks.\n"
+        "3. Past papers — under timed, exam conditions, no notes.\n"
+        "4. The Feynman technique — explain the concept out loud as if teaching a 10-year-old.\n\n"
+        "Re-reading notes is the least effective method — replace it with these."
+    ),
+    ("procrastinat", "lazy", "cant start", "can't start", "no motivation", "motivat", "start studying"): (
+        "To overcome procrastination:\n\n"
+        "1. Use the 2-minute rule — commit to studying for just 2 minutes. Starting is the hardest part.\n"
+        "2. Remove your phone from the room entirely, not just face-down.\n"
+        "3. Break the task into the smallest possible step.\n"
+        "4. Study with a friend or in a library — environment and accountability help enormously.\n"
+        "5. Reward yourself after each completed session, not before."
+    ),
+    ("focus", "concentrate", "distract", "phone", "social media"): (
+        "To improve focus:\n\n"
+        "1. Use the Pomodoro technique — 25 minutes fully focused, 5 minutes break.\n"
+        "2. Put your phone in a different room. Out of sight is out of mind.\n"
+        "3. Use website blockers (Cold Turkey or Freedom) during study sessions.\n"
+        "4. Study in a library or dedicated space, not your bedroom.\n"
+        "5. Stay hydrated — even mild dehydration reduces concentration noticeably."
+    ),
+    ("stress", "overwhelmed", "anxious", "anxiety", "panic", "burnout", "too much"): (
+        "Feeling overwhelmed is very common — here is how to manage it:\n\n"
+        "1. Write down every task on your mind — getting it out of your head reduces anxiety.\n"
+        "2. Pick just one task from that list and do only that. One thing at a time.\n"
+        "3. Take a 10-minute walk — physical movement resets your stress response.\n"
+        "4. Keep a consistent sleep schedule — sleep deprivation magnifies stress.\n"
+        "5. Talk to someone you trust, or visit your campus counselling service."
+    ),
+    ("sleep", "tired", "fatigue", "energy", "eat", "food", "diet", "nutrition"): (
+        "Your brain performs best when your body is looked after:\n\n"
+        "Sleep: Aim for 7-8 hours on a consistent schedule. A good night's sleep before "
+        "an exam beats cramming until 2am every time.\n\n"
+        "Nutrition: Eat a proper meal before studying. Brain-friendly foods include eggs, "
+        "nuts, oily fish, blueberries, and whole grains. Avoid high-sugar snacks that "
+        "cause energy crashes. Stay hydrated throughout the day."
+    ),
+    ("time management", "manage time", "deadline", "late submission", "planning"): (
+        "For better time management:\n\n"
+        "1. Every Sunday, write out all deadlines and tasks for the coming week.\n"
+        "2. Block study sessions in your calendar like fixed appointments.\n"
+        "3. Use the rule of 3 — identify the 3 most important tasks each day and do those first.\n"
+        "4. Build in buffer time — unexpected things always happen.\n"
+        "5. For assignments, aim to finish 2 days early to allow proofreading."
+    ),
+    ("assignment", "essay", "report", "submit", "write", "writing"): (
+        "For assignments and essays:\n\n"
+        "1. Read the brief and marking rubric carefully before writing a single word.\n"
+        "2. Plan your structure — introduction, key points, conclusion — before drafting.\n"
+        "3. Write a rough first draft without worrying about perfection.\n"
+        "4. Revise and improve the draft the next day with fresh eyes.\n"
+        "5. Proofread for grammar, citations, and word count before submitting.\n"
+        "6. Submit at least one day early to avoid last-minute technical issues."
+    ),
+    ("prediction", "predict", "pass", "fail", "result", "confidence"): (
+        "Your prediction is based on five factors: attendance, Internal Test 1, "
+        "Internal Test 2, assignment score, and daily study hours. To improve your "
+        "prediction, focus on whichever of these five factors is currently your weakest. "
+        "Would you like specific advice on any one of them?"
+    ),
+    ("help", "advice", "tip", "suggest", "what should", "how do i", "how can i", "what can"): (
+        "I can help you with:\n\n"
+        "- Study plans and revision timetables\n"
+        "- Exam and test preparation\n"
+        "- Managing procrastination and motivation\n"
+        "- Dealing with stress and exam anxiety\n"
+        "- Time management and deadlines\n"
+        "- Improving attendance\n"
+        "- Understanding your pass/fail prediction\n\n"
+        "Just ask me anything — be as specific as you like!"
+    ),
+}
+
+CONTEXT_FALLBACK = {
     "FAIL": (
-        "You are currently at academic risk. Focus on three things immediately: "
-        "increase your daily study hours to at least 3-4 hours, aim for above 85% "
-        "attendance, and review your weakest topics from your internal tests. "
-        "Would you like specific advice on any of these areas?"
+        "You are currently at academic risk. The three most impactful things to do right now: "
+        "increase daily study hours to at least 3-4 hours, attend every remaining class, and "
+        "review your weakest topics from your internal tests immediately. "
+        "What specific area would you like help with?"
     ),
     "PASS": (
-        "Your performance is on track — well done! To maintain this, keep your "
-        "attendance consistent, do not reduce your study hours, and start your "
-        "exam revision at least 3 weeks early. Is there a specific subject or "
-        "skill you want to strengthen further?"
+        "Your performance is on track — well done! To maintain and improve: keep attendance "
+        "above 85%, maintain your study hours, and begin exam revision at least 3 weeks early. "
+        "Is there a specific area you want to strengthen?"
     ),
     "default": (
-        "I am here to help you improve your academic performance. You can ask me "
-        "about study techniques, how to improve your attendance, how to prepare "
-        "for internal tests, or how to manage your time effectively. "
-        "What would you like help with?"
+        "I am EduMentor AI — your personal academic advisor. Ask me anything: study plans, "
+        "exam preparation, time management, stress, motivation, or how to improve your grades. "
+        "The more specific your question, the more tailored my advice will be."
     ),
 }
 
 
-def _get_openai_client():
+def _is_quota_error(exc: Exception) -> bool:
+    msg = str(exc).upper()
+    return "429" in str(exc) or "RESOURCE_EXHAUSTED" in msg or "QUOTA" in msg
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=2, max=8),
+    retry=retry_if_exception(lambda e: not _is_quota_error(e)),
+    reraise=True,
+)
+def _call_gemini(client, prompt: str) -> str:
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            max_output_tokens=350,
+            temperature=0.7,
+        ),
+        contents=prompt,
+    )
+    if not response.text:
+        raise ValueError("Gemini returned an empty response")
+    return response.text.strip()
+
+
+def generate_advice(message: str, prediction: str | None) -> dict:
     """
-    Dynamically initializes the OpenAI client at runtime.
-    Ensures environment variables loaded by load_dotenv() are properly picked up.
+    Returns:
+        {"message": str, "source": "ai" | "fallback"}
+    Raises:
+        GeminiQuotaError if Gemini quota/rate limit is exceeded.
     """
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+
     if not api_key:
-        return None
-    return OpenAI(api_key=api_key)
-
-
-def generate_advice(message: str, prediction: str | None) -> str:
-    """
-    Generate academic advice using OpenAI GPT.
-    Falls back to rule-based advice if the API call fails or the key is missing.
-    """
-    client = _get_openai_client()
-    if not client:
-        print("OpenAI API error: OPENAI_API_KEY environment variable is missing or empty.")
-        return _fallback_advice(message, prediction)
+        logger.warning("GEMINI_API_KEY not set — using fallback.")
+        return {"message": _fallback_advice(message, prediction), "source": "fallback"}
 
     context = ""
     if prediction == "FAIL":
-        context = "The student's latest academic prediction is FAIL — they are at risk of not passing."
+        context = "The student's latest academic prediction is FAIL — they are at risk of not passing.\n\n"
     elif prediction == "PASS":
-        context = "The student's latest academic prediction is PASS — they are currently on track."
+        context = "The student's latest academic prediction is PASS — they are currently on track.\n\n"
 
     try:
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": SYSTEM_PROMPT
-                },
-                {
-                    "role": "user",
-                    "content": f"{context}\n\nStudent message: {message}" if context else message
-                },
-            ],
-            max_tokens=250,
-            temperature=0.7,
-        )
-        return response.choices[0].message.content.strip()
+        client = genai.Client(api_key=api_key)
+        prompt = f"{context}Student message: {message}"
+        text = _call_gemini(client, prompt)
+        return {"message": text, "source": "ai"}
 
+    except GeminiQuotaError:
+        raise
     except Exception as e:
-        print(f"OpenAI API runtime error: {e}")
-        return _fallback_advice(message, prediction)
+        if _is_quota_error(e):
+            logger.error("Gemini quota exceeded: %s", e)
+            raise GeminiQuotaError(str(e)) from e
+        logger.warning("Gemini failed after retries, using fallback: %s", e)
+        return {"message": _fallback_advice(message, prediction), "source": "fallback"}
 
 
 def _fallback_advice(message: str, prediction: str | None) -> str:
-    """
-    Rule-based fallback used when the OpenAI API is unavailable.
-    Checks for broad multi-keyword intent groups to give intelligent advice.
-    """
     message_lower = message.lower()
 
-    # Intent groups mapped to comprehensive advice strings
-    intent_responses = {
-        ("attendance", "absent", "missed", "class"): (
-            "To improve attendance, set a daily alarm well before class and track your progress. "
-            "If you have missed classes, get notes from a classmate the same day, review the material, "
-            "and speak to your lecturer for support."
-        ),
-        ("study", "hours", "learn", "pomodoro", "technique"): (
-            "Effective study strategies include active recall and spaced repetition. Aim for 3-4 "
-            "focused hours per day using the Pomodoro technique (25 minutes of work, 5 minutes break) "
-            "to maintain deep concentration."
-        ),
-        ("test", "score", "grade", "mark", "fail", "assignment"): (
-            "To improve your grades, review every question you got wrong on tests and understand why. "
-            "Read assignment criteria carefully before starting, plan your answers, and visit your "
-            "lecturer during office hours for targeted help."
-        ),
-        ("exam", "revision", "prepare", "eat", "food", "diet", "sleep"): (
-            "Start exam prep 3 weeks early. Prioritize sleep and eat balanced, brain-healthy foods "
-            "(like nuts, fish, and whole grains) before tests to keep energy steady. Practice past "
-            "papers under timed conditions without notes."
-        ),
-        ("timetable", "schedule", "routine", "manage", "time", "calendar"): (
-            "To build a solid timetable, block out your fixed class times first, then add dedicated "
-            "3-hour study slots for each subject. Keep a digital calendar to track deadlines and "
-            "break large tasks into small, daily pieces."
-        ),
-        ("motivation", "lazy", "procrastinate", "focus", "start"): (
-            "Break your goals into small daily targets so progress feels visible. Study with a friend "
-            "for accountability, reduce phone distractions, and reward yourself after completing a "
-            "planned session."
-        ),
-        ("stress", "overwhelmed", "anxious", "mental", "tired", "burnout"): (
-            "Academic stress is normal. Manage it by keeping a consistent sleep schedule, taking "
-            "frequent short breaks, and talking to someone you trust. Your wellbeing always comes first; "
-            "don't hesitate to reach out to campus counseling."
-        ),
-    }
-
-    # Match any keyword inside the intent tuples
-    for keywords, response in intent_responses.items():
-        if any(keyword in message_lower for keyword in keywords):
+    for keywords, response in FALLBACK_RESPONSES.items():
+        if any(kw in message_lower for kw in keywords):
             return response
 
-    # Fallback to general prediction advice if no broad keywords match
-    if prediction in FALLBACK_ADVICE:
-        return FALLBACK_ADVICE[prediction]
+    if prediction == "FAIL":
+        return CONTEXT_FALLBACK["FAIL"]
+    elif prediction == "PASS":
+        return CONTEXT_FALLBACK["PASS"]
 
-    return FALLBACK_ADVICE["default"]
-s
+    return CONTEXT_FALLBACK["default"]
