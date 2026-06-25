@@ -31,15 +31,12 @@ function Message({ msg }) {
 
   return (
     <div className={`flex items-end gap-2 mb-4 ${isUser ? "flex-row-reverse" : ""}`}>
-
-      {/* Avatar */}
       <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs flex-shrink-0 ${
         isUser ? "bg-indigo-600 text-white" : "bg-indigo-100"
       }`}>
         {isUser ? "👤" : "🤖"}
       </div>
 
-      {/* Bubble */}
       <div className={`max-w-xs sm:max-w-md px-4 py-3 text-sm leading-relaxed ${
         isUser
           ? "bg-indigo-600 text-white rounded-2xl rounded-br-sm"
@@ -47,20 +44,20 @@ function Message({ msg }) {
       }`}>
         {msg.text}
       </div>
-
     </div>
   );
 }
 
 function Chatbot() {
-  const { state }                     = useLocation();
-  const [messages, setMessages]       = useState([]);
-  const [input, setInput]             = useState("");
-  const [loading, setLoading]         = useState(false);
-  const [isFallback, setIsFallback]   = useState(false);
+  const { state }                             = useLocation();
+  const [messages, setMessages]               = useState([]);
+  const [input, setInput]                     = useState("");
+  const [loading, setLoading]                 = useState(false);
   const [showSuggestions, setShowSuggestions] = useState(true);
-  const bottomRef                     = useRef(null);
-  const inputRef                      = useRef(null);
+  const [isFallback, setIsFallback]           = useState(false);
+  const bottomRef                             = useRef(null);
+  const inputRef                              = useRef(null);
+  const lastSentRef                           = useRef(0);
 
   // Auto-scroll to latest message
   useEffect(() => {
@@ -69,8 +66,8 @@ function Chatbot() {
 
   // Greet on mount — use prediction context if coming from PredictionForm
   useEffect(() => {
-    const prediction  = state?.prediction;
-    const confidence  = state?.confidence;
+    const prediction = state?.prediction;
+    const confidence = state?.confidence;
 
     let greeting;
 
@@ -86,6 +83,11 @@ function Chatbot() {
   }, []);
 
   const sendMessage = async (text) => {
+    // Debounce — block sends within 1.5s of the last one
+    const now = Date.now();
+    if (now - lastSentRef.current < 1500) return;
+    lastSentRef.current = now;
+
     const userText = text.trim();
     if (!userText || loading) return;
 

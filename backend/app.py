@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, jwt_required, get_jwt_identity
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from dotenv import load_dotenv
 from datetime import timedelta
 import os
@@ -25,6 +27,21 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
 JWTManager(app)
 
+
+def _rate_limit_key():
+    try:
+        return str(get_jwt_identity())
+    except Exception:
+        return get_remote_address()
+
+
+limiter = Limiter(
+    key_func=_rate_limit_key,
+    app=app,
+    default_limits=["30 per minute"],
+    storage_uri="memory://",
+)
+
 app.register_blueprint(auth_bp)
 app.register_blueprint(predictions_bp)
 
@@ -33,6 +50,7 @@ with app.app_context():
 
 
 @app.route("/chat", methods=["POST"])
+@limiter.limit("10 per minute")
 @jwt_required()
 def chat():
     data    = request.get_json()
@@ -60,6 +78,14 @@ def chat():
     except Exception:
         app.logger.exception("Chat error")
         return jsonify({"error": "An internal server error occurred."}), 500
+
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify({
+        "error": "You're sending messages too quickly. Please wait a moment.",
+        "retry_after": 60,
+    }), 429
 
 
 @app.route("/health", methods=["GET"])
