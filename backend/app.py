@@ -27,6 +27,12 @@ app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
 JWTManager(app)
 
+app.register_blueprint(auth_bp)
+app.register_blueprint(predictions_bp)
+
+with app.app_context():
+    db.create_all()
+
 
 def _rate_limit_key():
     try:
@@ -42,12 +48,6 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
-app.register_blueprint(auth_bp)
-app.register_blueprint(predictions_bp)
-
-with app.app_context():
-    db.create_all()
-
 
 @app.route("/chat", methods=["POST"])
 @limiter.limit("10 per minute")
@@ -55,6 +55,7 @@ with app.app_context():
 def chat():
     data    = request.get_json()
     message = data.get("message", "").strip()
+    history = data.get("history", [])
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
@@ -65,10 +66,21 @@ def chat():
         .order_by(Prediction.created_at.desc())
         .first()
     )
-    prediction = latest.prediction if latest else data.get("prediction")
+
+    student_context = None
+    if latest:
+        student_context = {
+            "prediction":  latest.prediction,
+            "confidence":  latest.confidence,
+            "attendance":  latest.attendance,
+            "test1":       latest.test1,
+            "test2":       latest.test2,
+            "assignment":  latest.assignment,
+            "study_hours": latest.study_hours,
+        }
 
     try:
-        result = generate_advice(message, prediction)
+        result = generate_advice(message, student_context, history)
         return jsonify(result)
     except GeminiQuotaError:
         return jsonify({

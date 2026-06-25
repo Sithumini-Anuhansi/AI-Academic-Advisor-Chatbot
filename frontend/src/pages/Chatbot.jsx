@@ -36,8 +36,7 @@ function Message({ msg }) {
       }`}>
         {isUser ? "👤" : "🤖"}
       </div>
-
-      <div className={`max-w-xs sm:max-w-md px-4 py-3 text-sm leading-relaxed ${
+      <div className={`max-w-xs sm:max-w-md px-4 py-3 text-sm leading-relaxed whitespace-pre-line ${
         isUser
           ? "bg-indigo-600 text-white rounded-2xl rounded-br-sm"
           : "bg-white border border-gray-200 text-gray-800 rounded-2xl rounded-bl-sm"
@@ -59,31 +58,45 @@ function Chatbot() {
   const inputRef                              = useRef(null);
   const lastSentRef                           = useRef(0);
 
-  // Auto-scroll to latest message
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  // Greet on mount — use prediction context if coming from PredictionForm
+  // Greet on mount — prefer router state, fall back to fetching latest prediction
+  // so the greeting survives a page refresh
   useEffect(() => {
-    const prediction = state?.prediction;
-    const confidence = state?.confidence;
+    const buildGreeting = async () => {
+      let prediction = state?.prediction;
+      let confidence  = state?.confidence;
 
-    let greeting;
+      if (!prediction) {
+        try {
+          const res = await API.get("/predictions/latest");
+          if (res.data.latest) {
+            prediction = res.data.latest.prediction;
+            confidence = res.data.latest.confidence;
+          }
+        } catch {
+          // no history yet, or not authenticated — use generic greeting
+        }
+      }
 
-    if (prediction === "FAIL") {
-      greeting = `Hello! I can see your recent prediction came back as FAIL with ${confidence}% confidence. Don't worry — this is exactly why I'm here. Let's work out a plan to turn things around. What would you like help with first?`;
-    } else if (prediction === "PASS") {
-      greeting = `Hello! Great news — your recent prediction came back as PASS with ${confidence}% confidence. Keep up the good work! I'm here if you want tips on maintaining or improving your performance. What would you like to know?`;
-    } else {
-      greeting = "Hello! I'm your AI academic advisor. I can help you improve your study habits, understand your predictions, and build a plan to succeed. What would you like to talk about?";
-    }
+      let greeting;
+      if (prediction === "FAIL") {
+        greeting = `Hello! I can see your recent prediction came back as FAIL with ${confidence}% confidence. Don't worry — this is exactly why I'm here. Let's work out a plan to turn things around. What would you like help with first?`;
+      } else if (prediction === "PASS") {
+        greeting = `Hello! Great news — your recent prediction came back as PASS with ${confidence}% confidence. Keep up the good work! I'm here if you want tips on maintaining or improving your performance. What would you like to know?`;
+      } else {
+        greeting = "Hello! I'm your AI academic advisor. I can help you improve your study habits, understand your predictions, and build a plan to succeed. What would you like to talk about?";
+      }
 
-    setMessages([{ role: "bot", text: greeting }]);
+      setMessages([{ role: "bot", text: greeting }]);
+    };
+
+    buildGreeting();
   }, []);
 
   const sendMessage = async (text) => {
-    // Debounce — block sends within 1.5s of the last one
     const now = Date.now();
     if (now - lastSentRef.current < 1500) return;
     lastSentRef.current = now;
@@ -98,8 +111,11 @@ function Chatbot() {
 
     try {
       const res = await API.post("/chat", {
-        message:    userText,
-        prediction: state?.prediction || null,
+        message: userText,
+        history: messages.slice(-6).map((m) => ({
+          role: m.role === "user" ? "user" : "model",
+          text: m.text,
+        })),
       });
 
       setIsFallback(res.data.source === "fallback");

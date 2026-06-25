@@ -32,6 +32,8 @@ Guidelines:
 - Give SPECIFIC, ACTIONABLE advice — never vague motivation.
 - When asked to CREATE something (a plan, timetable, schedule) — actually create it with clear structure.
 - When asked a HOW question — give numbered steps.
+- Use the student's actual data (attendance, test scores, assignment score, study hours) when given —
+  reference their specific numbers rather than speaking generically.
 - Keep responses focused: 4 to 8 sentences or a short structured list.
 - If the student has a FAIL prediction, be direct about urgency but stay positive.
 - If the student has a PASS prediction, encourage improvement.
@@ -176,7 +178,7 @@ def _is_quota_error(exc: Exception) -> bool:
     retry=retry_if_exception(lambda e: not _is_quota_error(e)),
     reraise=True,
 )
-def _call_gemini(client, prompt: str) -> str:
+def _call_gemini(client, contents):
     response = client.models.generate_content(
         model="gemini-2.5-flash",
         config=types.GenerateContentConfig(
@@ -184,36 +186,63 @@ def _call_gemini(client, prompt: str) -> str:
             max_output_tokens=350,
             temperature=0.7,
         ),
-        contents=prompt,
+        contents=contents,
     )
     if not response.text:
         raise ValueError("Gemini returned an empty response")
     return response.text.strip()
 
 
-def generate_advice(message: str, prediction: str | None) -> dict:
+def _build_context_string(student_context: dict) -> str:
+    return (
+        f"Student's latest data — Attendance: {student_context['attendance']}%, "
+        f"Internal Test 1: {student_context['test1']}/40, "
+        f"Internal Test 2: {student_context['test2']}/40, "
+        f"Assignment: {student_context['assignment']}/10, "
+        f"Daily study hours: {student_context['study_hours']}, "
+        f"Prediction: {student_context['prediction']} "
+        f"(confidence: {student_context['confidence']}%).\n\n"
+    )
+
+
+def generate_advice(message: str, student_context: dict | None, history: list | None = None) -> dict:
     """
+    student_context: {
+        prediction, confidence, attendance, test1, test2, assignment, study_hours
+    } or None if the student has no prediction history yet.
+
+    history: list of {"role": "user"|"model", "text": str} — the last few turns
+    of the conversation, sent so follow-up questions stay contextual.
+
     Returns:
         {"message": str, "source": "ai" | "fallback"}
     Raises:
         GeminiQuotaError if Gemini quota/rate limit is exceeded.
     """
-    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    api_key    = os.environ.get("GEMINI_API_KEY", "").strip()
+    prediction = student_context.get("prediction") if student_context else None
 
     if not api_key:
         logger.warning("GEMINI_API_KEY not set — using fallback.")
         return {"message": _fallback_advice(message, prediction), "source": "fallback"}
 
-    context = ""
-    if prediction == "FAIL":
-        context = "The student's latest academic prediction is FAIL — they are at risk of not passing.\n\n"
-    elif prediction == "PASS":
-        context = "The student's latest academic prediction is PASS — they are currently on track.\n\n"
+    context = _build_context_string(student_context) if student_context else ""
+
+    contents = []
+    for turn in (history or []):
+        role = turn.get("role", "user")
+        text = turn.get("text", "")
+        if text:
+            contents.append({"role": role, "parts": [{"text": text}]})
+
+    contents.append({
+        "role": "user",
+        "parts": [{"text": f"{context}Student message: {message}"}],
+    })
 
     try:
         client = genai.Client(api_key=api_key)
-        prompt = f"{context}Student message: {message}"
-        text = _call_gemini(client, prompt)
+        text = _call_gemini(client, contents)
         return {"message": text, "source": "ai"}
 
     except GeminiQuotaError:

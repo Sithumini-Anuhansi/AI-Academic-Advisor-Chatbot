@@ -61,6 +61,17 @@ def history():
     return jsonify({"predictions": [r.to_dict() for r in records]})
 
 
+@predictions_bp.route("/predictions/latest", methods=["GET"])
+@jwt_required()
+def latest():
+    user_id = int(get_jwt_identity())
+    record = Prediction.query.filter_by(user_id=user_id) \
+                .order_by(Prediction.created_at.desc()).first()
+    if not record:
+        return jsonify({"latest": None})
+    return jsonify({"latest": record.to_dict()})
+
+
 @predictions_bp.route("/predictions/analytics", methods=["GET"])
 @jwt_required()
 def analytics():
